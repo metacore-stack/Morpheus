@@ -1,44 +1,42 @@
 // Modules to control application life and create native browser window
-const { app, BrowserWindow, dialog } = require('electron')
+const { app, BrowserWindow, dialog, ipcMain, session } = require('electron')
 const path = require('path')
 const { exec } = require('child_process');
-const os = require('os');
-const util = require('util');
+const http = require('http');
 const fs = require('fs');
-// Create the log file
-const logFilePath = path.join(os.homedir(), 'process_env.log');
-fs.writeFileSync(logFilePath, util.inspect(process.env), 'utf-8');
 
+let ollamaProcess = null; // Variable to store the Ollama process (only set if we spawn it)
 
-let ollamaProcess = null; // Variable to store the Ollama process
+// Check whether an Ollama server is already responding on the default port.
+function isOllamaUp() {
+  return new Promise((resolve) => {
+    const req = http.get('http://127.0.0.1:11434/api/tags', (res) => {
+      res.resume();
+      resolve(res.statusCode === 200);
+    });
+    req.on('error', () => resolve(false));
+    req.setTimeout(1000, () => { req.destroy(); resolve(false); });
+  });
+}
 
-// Define the runOllamaCommand function
-function runOllamaCommand() {
-  // Define the PATH for the child process
-  const env = { ...process.env };
+// Ensure Ollama is serving. If it is already running (e.g. the Windows service),
+// attach to it; otherwise spawn `ollama serve` using the platform's default shell.
+async function runOllamaCommand() {
+  if (await isOllamaUp()) {
+    console.log('Ollama server is already running');
+    return;
+  }
 
-  // Check if ollama is installed
-  exec('ollama --version', { env, shell: '/bin/sh' }, (error, stdout, stderr) => {
-    if (error) {
-      console.error(`Ollama is not installed: ${error}`);
-      dialog.showErrorBox('Error', `Ollama is not installed: ${error}`);
+  // shell: true lets Windows resolve ollama.exe via PATH (no hardcoded /bin/sh).
+  ollamaProcess = exec('ollama serve', { env: { ...process.env }, shell: true, maxBuffer: 1024 * 500 }, (error, stdout, stderr) => {
+    // "address already in use" just means another instance beat us to it — ignore.
+    if (error && !/already in use|bind|EADDRINUSE/i.test(String(error))) {
+      console.error(`Error executing Ollama: ${error}`);
+      dialog.showErrorBox('Error', `Could not start Ollama: ${error.message}\n\nMake sure Ollama is installed and on your PATH.`);
       return;
     }
-
-    // If ollama is installed, run ollama serve
-    ollamaProcess = exec('ollama serve', { env, shell: '/bin/bash', maxBuffer: 1024 * 500 }, (error, stdout, stderr) => {
-      if (error) {
-        console.error(`Error executing Ollama: ${error}`);
-        dialog.showErrorBox('Error', `Error executing Ollama: ${error}`);
-        return;
-      }
-
-      // Output verbose logging
-      console.log(`Ollama Output: ${stdout}`);
-      if (stderr) {
-        console.error(`Ollama Errors: ${stderr}`);
-      }
-    });
+    if (stdout) console.log(`Ollama Output: ${stdout}`);
+    if (stderr) console.error(`Ollama Errors: ${stderr}`);
   });
 }
 
@@ -46,31 +44,38 @@ function runOllamaCommand() {
 function createWindow () {
   // Create the browser window.
   const mainWindow = new BrowserWindow({
-    // width: 800,
+    width: 1000,
     height: 800,
     webPreferences: {
-      preload: path.join(__dirname, 'preload.js')
+      preload: path.join(__dirname, 'preload.js'),
+      // The renderer fetches the Ollama API directly from a file:// page; disabling
+      // webSecurity lets those cross-origin requests through on this local-only app.
+      webSecurity: false
     }
-    
   })
 
-  //  load the index.html of the app.
-  mainWindow.loadFile('ui/index.html')
+  // Load the index.html of the app (absolute path so it works regardless of cwd).
+  mainWindow.loadFile(path.join(__dirname, 'ui', 'index.html'))
 
-  // Open the DevTools.
-//  mainWindow.webContents.openDevTools()
-   mainWindow.webContents.openDevTools()
-
+  // Uncomment to debug the renderer:
+  // mainWindow.webContents.openDevTools()
 }
 
-// This method will be called when Electron has finished
-// initialization and is ready to create browser windows.
-// Some APIs can only be used after this event occurs.
+// This method will be called when Electron has finished initialization and is
+// ready to create browser windows. Some APIs can only be used after this event.
 app.whenReady().then(() => {
-runOllamaCommand(); // Serve Ollama
+  // Rewrite the Origin header on requests to the Ollama API so its CORS check
+  // accepts requests coming from the file:// renderer. This mirrors what the
+  // Chrome-extension build does with declarativeNetRequest.
+  session.defaultSession.webRequest.onBeforeSendHeaders((details, callback) => {
+    if (details.url.includes(':11434')) {
+      details.requestHeaders['Origin'] = 'http://localhost:11434';
+    }
+    callback({ requestHeaders: details.requestHeaders });
+  });
+
+  runOllamaCommand(); // Serve Ollama (attaches to a running instance if present)
   createWindow();
-
-
 
   app.on('activate', function () {
     // On macOS it's common to re-create a window in the app when the
@@ -79,43 +84,23 @@ runOllamaCommand(); // Serve Ollama
   })
 })
 
-// Quit when all windows are closed, except on macOS. There, it's common
-// for applications and their menu bar to stay active until the user quits
-// explicitly with Cmd + Q.
-// Quit when all windows are closed, and kill Ollama process
+// Quit when all windows are closed, except on macOS.
 app.on('window-all-closed', function() {
-/*   if (ollamaProcess !== null) {
-      ollamaProcess.kill(); // Kill Ollama process
-  } */
   if (process.platform !== 'darwin') app.quit();
 });
 
-/* app.on('activate', function () {
-  // On macOS, re-create a window when the dock icon is clicked and there are no other windows open
-  if (BrowserWindow.getAllWindows().length === 0) createWindow();
-}); */
-
+// Clean up the Ollama process on quit — only if we were the ones who started it.
 app.on('before-quit', function () {
-  // This will handle the Cmd + Q case on macOS
-  // You can do any cleanup here before your application quits
-  ollamaProcess.kill(); // Kill Ollama process
+  if (ollamaProcess) {
+    ollamaProcess.kill();
+    ollamaProcess = null;
+  }
 });
 
-app.on('will-quit', function () {
-  // This will handle the Cmd + Q case on macOS
-  // You can do any cleanup here before your application quits
-
-//  ollamaProcess.kill(); // Kill Ollama process
-
-});
-
-// In this file you can include the rest of your app's specific main process
-// code. You can also put them in separate files and require them here.
-
+// --- IPC handlers (renderer <-> main) ---
 
 ipcMain.handle('check-update', () => {
   console.log('CHECK FOR UPDATES');
-  
 })
 
 ipcMain.handle('ping', () => {
@@ -123,11 +108,11 @@ ipcMain.handle('ping', () => {
 })
 
 ipcMain.handle('get-new-models', async () => {
-  let models = await fs.readJSON(path.join(__dirname, 'models.json')).catch((err) => {
+  try {
+    const raw = await fs.promises.readFile(path.join(__dirname, 'models.json'), 'utf-8');
+    return JSON.parse(raw);
+  } catch (err) {
     console.error(err);
-  })
-  if(!models) return 'Models not found';
-  return models;
+    return 'Models not found';
+  }
 })
-
-// ipcMain.handle()
