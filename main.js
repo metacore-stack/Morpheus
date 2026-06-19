@@ -5,6 +5,12 @@ const { exec } = require('child_process');
 const http = require('http');
 const fs = require('fs');
 
+// Disable Chromium hardware-accelerated rendering. Compute-only / headless GPUs
+// (e.g. NVIDIA Tesla K80) can't provide a desktop GL context, so the GPU process
+// fails to initialize ("Exiting GPU process due to errors during initialization").
+// Software rendering avoids that; Ollama still uses the GPU for inference via CUDA.
+app.disableHardwareAcceleration();
+
 let ollamaProcess = null; // Variable to store the Ollama process (only set if we spawn it)
 
 // Check whether an Ollama server is already responding on the default port.
