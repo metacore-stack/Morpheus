@@ -114,6 +114,8 @@ function getSelectedModel() {
 // no need to make a new one for every time submitRequest is called
 const scrollWrapper = document.getElementById('scroll-wrapper');
 let isAutoScrollOn = true;
+// tracks the in-flight generation request so it can be aborted when the chat is deleted
+let currentRequest = null;
 // autoscroll when new line is added
 const autoScroller = new ResizeObserver(() => {
   if (isAutoScrollOn) {
@@ -176,6 +178,7 @@ async function submitRequest() {
 
   // create button to stop text generation
   let interrupt = new AbortController();
+  currentRequest = interrupt; // expose so deleteChat() can cancel an in-flight generation
   let stopButton = document.createElement('button');
   stopButton.className = 'btn btn-danger';
   stopButton.innerHTML = 'Stop';
@@ -256,9 +259,26 @@ window.onload = () => {
 }
 
 function deleteChat() {
+  // Stop any in-flight generation so it can't keep streaming into the cleared view
+  if (currentRequest) {
+    currentRequest.abort('Chat deleted');
+    currentRequest = null;
+  }
+
+  // Delete the saved chat selected in the History dropdown, if one is selected
   const selectedChat = document.getElementById("chat-select").value;
-  localStorage.removeItem(selectedChat);
-  updateChatList();
+  if (selectedChat) {
+    localStorage.removeItem(selectedChat);
+    updateChatList();
+  }
+
+  // Clear the live conversation: both the visible bubbles and the Ollama context memory
+  const chatHistory = document.getElementById("chat-history");
+  chatHistory.innerHTML = "";
+  chatHistory.context = undefined;
+
+  // Return to the initial empty state
+  document.getElementById("chat-container").style.display = "none";
 }
 
 // Function to save chat with a unique name

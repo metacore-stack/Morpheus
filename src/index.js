@@ -24,6 +24,12 @@ const {
 // This will be turned on by default when running the app in non-packaged mode
 global.debug = false;
 
+// Disable Chromium hardware-accelerated rendering. Compute-only / headless GPUs
+// (e.g. NVIDIA Tesla K80) can't provide a desktop GL context, so the GPU process
+// fails to initialize ("Exiting GPU process due to errors during initialization").
+// Software rendering avoids that; Ollama still uses the GPU for inference via CUDA.
+app.disableHardwareAcceleration();
+
 const appVersion = app.getVersion();
 const osType = os.type(); // e.g., 'Darwin', 'Windows_NT', etc.
 const osArch = os.arch(); // e.g., 'x64', 'ia32', etc.

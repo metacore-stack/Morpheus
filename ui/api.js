@@ -122,7 +122,7 @@ const modelInstallButton = document.getElementById('install-model-button');
 const modelInstallProgress = document.getElementById('model-progress-bar');
 var installing = false;
 
-modelInstallButton.addEventListener('click', () => {
+modelInstallButton?.addEventListener('click', () => {
   if(selectedModel && selectedModelTag) {
     if(installing) return;
     installing = true;
@@ -197,7 +197,7 @@ var loadedModels;
 var selectedModel;
 var selectedModelTag;
 
-document.getElementById('model-install-button').addEventListener('click', async () => {
+document.getElementById('model-install-button')?.addEventListener('click', async () => {
   let models = loadedModels = await window.ollama.getNewModels().catch((error) => {
     console.error()
   });
@@ -222,7 +222,7 @@ document.getElementById('model-install-button').addEventListener('click', async 
   modal.show();
 });
 
-modelSelectElement.addEventListener('input', (ev) => {
+modelSelectElement?.addEventListener('input', (ev) => {
   console.log('SELECTED MODEL:', ev.target.value);
   selectedModel = ev.target.value;
   updateTags(selectedModel);
@@ -241,7 +241,7 @@ function updateTags(model) {
   })
 }
 
-modelTagSelectElement.addEventListener('input', (ev) => {
+modelTagSelectElement?.addEventListener('input', (ev) => {
   console.log('SELECTED TAG: ', ev.target.value);
   selectedModelTag = ev.target.value;
 
